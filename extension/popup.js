@@ -232,6 +232,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Apply menu button
     applyMenuBtn.addEventListener('click', function() {
+        // If this section is already visible, hide it
+        if (applySection.style.display === 'block') {
+            applySection.style.display = 'none';
+            applyMenuBtn.classList.remove('active');
+            return;
+        }
+        
+        // Otherwise, hide all sections and show this one
         hideAllSections();
         applySection.style.display = 'block';
         applyMenuBtn.classList.add('active');
@@ -240,6 +248,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Train menu button
     trainMenuBtn.addEventListener('click', function() {
+        // If this section is already visible, hide it
+        if (trainingSection.style.display === 'block') {
+            trainingSection.style.display = 'none';
+            trainMenuBtn.classList.remove('active');
+            return;
+        }
+        
+        // Otherwise, hide all sections and show this one
         hideAllSections();
         trainingSection.style.display = 'block';
         trainMenuBtn.classList.add('active');
@@ -248,6 +264,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Batch menu button
     batchMenuBtn.addEventListener('click', function() {
+        // If this section is already visible, hide it
+        if (batchTrainingSection.style.display === 'block') {
+            batchTrainingSection.style.display = 'none';
+            batchMenuBtn.classList.remove('active');
+            return;
+        }
+        
+        // Otherwise, hide all sections and show this one
         hideAllSections();
         batchTrainingSection.style.display = 'block';
         batchMenuBtn.classList.add('active');
@@ -256,6 +280,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Test menu button
     testMenuBtn.addEventListener('click', function() {
+        // If this section is already visible, hide it
+        if (testSection.style.display === 'block') {
+            testSection.style.display = 'none';
+            testMenuBtn.classList.remove('active');
+            return;
+        }
+        
+        // Otherwise, hide all sections and show this one
         hideAllSections();
         testSection.style.display = 'block';
         testMenuBtn.classList.add('active');
