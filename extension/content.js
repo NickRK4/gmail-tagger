@@ -181,6 +181,88 @@ async function applyLabel(labelName) {
     }
 }
 
+// Function to predict and apply label for new emails
+async function predictAndApplyLabel(emailContent) {
+    try {
+        if (!emailContent || !emailContent.body) {
+            console.log('No email content to predict');
+            return;
+        }
+
+        // Call the prediction endpoint
+        const response = await fetch('http://localhost:5050/predict', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: emailContent.body
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to get prediction');
+        }
+
+        const prediction = await response.json();
+        if (prediction && prediction.label) {
+            console.log('Predicted label:', prediction.label);
+            await applyLabel(prediction.label);
+        }
+    } catch (error) {
+        console.error('Error in predictAndApplyLabel:', error);
+    }
+}
+
+// Keep track of processed emails to avoid duplicates
+const processedEmails = new Set();
+
+// Function to check if an element is a new email
+function isNewEmail(element) {
+    return (
+        element.matches('div[role="main"] div[role="list"] div[role="listitem"]') ||
+        element.matches('.adn.ads')
+    );
+}
+
+// Listen for new emails and classify them
+const observer = new MutationObserver((mutations) => {
+    mutations.forEach(mutation => {
+        mutation.addedNodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                // Check if this is a new email
+                if (isNewEmail(node)) {
+                    // Get thread ID to avoid processing the same email twice
+                    const threadId = node.querySelector('[data-thread-perm-id]')?.getAttribute('data-thread-perm-id');
+                    if (threadId && !processedEmails.has(threadId)) {
+                        processedEmails.add(threadId);
+                        
+                        // Get email content and predict label
+                        const emailContent = {
+                            body: node.textContent,
+                            threadId: threadId
+                        };
+                        
+                        console.log('New email detected, predicting label...');
+                        predictAndApplyLabel(emailContent);
+                    }
+                }
+            }
+        });
+    });
+});
+
+// Start observing changes in the Gmail interface
+function startObserving() {
+    const config = { childList: true, subtree: true };
+    const targetNode = document.body;
+    observer.observe(targetNode, config);
+    console.log('Started observing for new emails');
+}
+
+// Initialize observation when the script loads
+startObserving();
+
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'getEmailContent') {
@@ -195,76 +277,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ pong: true });
     }
 });
-
-// Keep track of processed emails to avoid duplicates
-const processedEmails = new Set();
-
-// Listen for new emails and classify them
-const observer = new MutationObserver(() => {
-    try {
-        const emailData = getEmailContent();
-        if (!emailData) return;
-        
-        // Create a unique identifier for the email
-        const emailId = `${emailData.subject}-${emailData.body.substring(0, 50)}`;
-        
-        // Skip if we've already processed this email
-        if (processedEmails.has(emailId)) return;
-        processedEmails.add(emailId);
-        
-        // Combine subject and body for better classification
-        const fullText = `${emailData.subject}\n${emailData.body}`;
-        
-        console.log('Sending email for classification:', {
-            subject: emailData.subject,
-            bodyPreview: emailData.body.substring(0, 100) + '...'
-        });
-        
-        fetch('http://localhost:5050/predict', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ text: fullText })
-        })
-        .then(response => {
-            console.log('Classification response status:', response.status);
-            if (!response.ok) {
-                return response.json().then(errorData => {
-                    throw new Error(`Server error: ${response.status} - ${errorData.error || response.statusText}`);
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            console.log('Classification result:', data);
-            if (data.label) {
-                console.log('Applying label:', data.label);
-                return applyLabel(data.label);
-            } else {
-                console.log('No label to apply:', data.message || 'No confident prediction');
-            }
-        })
-        .catch(error => {
-            console.error('Error in email classification:', error.message);
-        });
-    } catch (error) {
-        console.error('Error in observer:', error);
-    }
-});
-
-// Start observing changes in Gmail
-observer.observe(document.body, {
-    childList: true,
-    subtree: true
-});
-
-// Clean up old processed emails periodically
-setInterval(() => {
-    if (processedEmails.size > 1000) {
-        processedEmails.clear();
-    }
-}, 3600000); // Clean up every hour
 
 // Send a message to the background script to confirm content script is loaded
 chrome.runtime.sendMessage({ action: 'contentScriptLoaded' }, (response) => {
