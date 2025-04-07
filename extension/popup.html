@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Gmail Label Classifier</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 15px;
+      font-family: Arial, sans-serif;
+    }
+    .status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #357abd;
+    }
+    .label-input {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <h2>Gmail Label Classifier</h2>
+  <div id="status" class="status"></div>
+  <div id="training-section">
+    <h3>Train Model</h3>
+    <input type="text" id="label-input" class="label-input" placeholder="Enter label name">
+    <button id="train-btn">Train Current Email</button>
+  </div>
+  <hr>
+  <button id="check-server">Check Server Status</button>
+  <script src="popup.js"></script>
+</body>
+</html>
