@@ -2,14 +2,22 @@
   "manifest_version": 3,
   "name": "Gmail Label Classifier",
   "version": "1.0",
-  "description": "Automatically classifies and labels Gmail emails using machine learning",
+  "description": "Automatically classifies and labels Gmail messages",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "identity"
   ],
+  "oauth2": {
+    "client_id": "${YOUR_CLIENT_ID}",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.labels",
+      "https://www.googleapis.com/auth/gmail.modify"
+    ]
+  },
   "host_permissions": [
-    "http://localhost:5050/*",
-    "https://mail.google.com/*"
+    "https://mail.google.com/*",
+    "https://www.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js"

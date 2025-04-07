@@ -3,10 +3,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const trainBtn = document.getElementById('train-btn');
     const labelInput = document.getElementById('label-input');
     const checkServerBtn = document.getElementById('check-server');
+    const openGmailBtn = document.createElement('button');
+    
+    openGmailBtn.textContent = 'Open Gmail';
+    openGmailBtn.className = 'btn';
+    openGmailBtn.style.marginTop = '10px';
+    openGmailBtn.addEventListener('click', () => {
+        chrome.tabs.create({ url: 'https://mail.google.com' });
+    });
 
     function showStatus(message, isError = false) {
         statusDiv.textContent = message;
         statusDiv.className = 'status ' + (isError ? 'error' : 'success');
+        
+        // Show Gmail button if we're not on Gmail
+        if (isError && message.includes('navigate to Gmail')) {
+            statusDiv.appendChild(document.createElement('br'));
+            statusDiv.appendChild(openGmailBtn);
+        }
     }
 
     async function getCurrentTab() {
@@ -14,20 +28,48 @@ document.addEventListener('DOMContentLoaded', function() {
         return tab;
     }
 
+    async function checkIfContentScriptLoaded(tabId) {
+        return new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabId, { action: 'ping' }, response => {
+                resolve(!chrome.runtime.lastError && response && response.pong);
+            });
+        });
+    }
+
+    async function injectContentScriptIfNeeded(tab) {
+        // Check if we're on Gmail
+        if (!tab.url || !tab.url.includes('mail.google.com')) {
+            throw new Error('Please navigate to Gmail to use this extension');
+        }
+        
+        // Check if content script is already loaded
+        const isLoaded = await checkIfContentScriptLoaded(tab.id);
+        if (isLoaded) return;
+        
+        // Inject content script if not loaded
+        await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+        });
+        
+        // Wait a bit for the script to initialize
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
     async function getEmailContent() {
         try {
             const tab = await getCurrentTab();
             
-            // Check if we're on Gmail
-            if (!tab.url.includes('mail.google.com')) {
-                throw new Error('Please navigate to Gmail to use this extension');
-            }
+            // Make sure content script is loaded
+            await injectContentScriptIfNeeded(tab);
             
             // Send message with error handling
             return new Promise((resolve, reject) => {
                 chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' }, (response) => {
                     if (chrome.runtime.lastError) {
                         reject(new Error(chrome.runtime.lastError.message));
+                    } else if (!response) {
+                        reject(new Error('No email content found'));
                     } else {
                         resolve(response);
                     }
@@ -86,7 +128,20 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             if (response.ok) {
-                showStatus(`Successfully trained model with label: ${label}`);
+                // After successful training, also apply the label
+                try {
+                    const tab = await getCurrentTab();
+                    // Send message to apply the label
+                    await chrome.tabs.sendMessage(tab.id, { 
+                        action: 'applyLabel', 
+                        label: label 
+                    });
+                    showStatus(`Successfully trained model and applied label: ${label}`);
+                } catch (labelError) {
+                    console.error('Error applying label:', labelError);
+                    showStatus(`Model trained but couldn't apply label: ${labelError.message}`, true);
+                }
+                
                 labelInput.value = '';
             } else {
                 const error = await response.json();
