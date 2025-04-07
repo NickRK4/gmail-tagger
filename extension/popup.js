@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('status');
     const trainBtn = document.getElementById('train-btn');
-    const trainToggleBtn = document.getElementById('train-toggle-btn');
     const applyBtn = document.getElementById('apply-btn');
     const labelInput = document.getElementById('label-input');
     const checkServerBtn = document.getElementById('check-server');
@@ -15,6 +14,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const predictionLabel = document.getElementById('prediction-label');
     const predictionConfidence = document.getElementById('prediction-confidence');
     const resetModelBtn = document.getElementById('reset-model-btn');
+    // New elements for batch training
+    const batchTrainBtn = document.getElementById('batch-train-btn');
+    const batchLabelInput = document.getElementById('batch-label-input');
+    const batchTrainingSection = document.getElementById('batch-training-section');
+    const batchProcessingIndicator = document.getElementById('batch-processing-indicator');
+    const batchProgressCount = document.getElementById('batch-progress-count');
+    const batchTotalCount = document.getElementById('batch-total-count');
+    const batchResults = document.getElementById('batch-results');
+    const batchSuccessCount = document.getElementById('batch-success-count');
+    const applySection = document.getElementById('apply-section');
+    const testSection = document.getElementById('test-section');
+    
+    // Menu buttons
+    const applyMenuBtn = document.getElementById('apply-menu-btn');
+    const trainMenuBtn = document.getElementById('train-menu-btn');
+    const batchMenuBtn = document.getElementById('batch-menu-btn');
+    const testMenuBtn = document.getElementById('test-menu-btn');
+    
     const openGmailBtn = document.createElement('button');
     
     openGmailBtn.textContent = 'Open Gmail';
@@ -198,6 +215,54 @@ document.addEventListener('DOMContentLoaded', function() {
         return results;
     }
 
+    // Hide all sections function
+    function hideAllSections() {
+        trainingSection.style.display = 'none';
+        batchTrainingSection.style.display = 'none';
+        testSection.style.display = 'none';
+        applySection.style.display = 'none';
+        testResult.style.display = 'none';
+        
+        // Reset active state on all menu buttons
+        applyMenuBtn.classList.remove('active');
+        trainMenuBtn.classList.remove('active');
+        batchMenuBtn.classList.remove('active');
+        testMenuBtn.classList.remove('active');
+    }
+    
+    // Apply menu button
+    applyMenuBtn.addEventListener('click', function() {
+        hideAllSections();
+        applySection.style.display = 'block';
+        applyMenuBtn.classList.add('active');
+        showStatus('Select emails to apply labels to');
+    });
+    
+    // Train menu button
+    trainMenuBtn.addEventListener('click', function() {
+        hideAllSections();
+        trainingSection.style.display = 'block';
+        trainMenuBtn.classList.add('active');
+        showStatus('Enter a label for the currently open email');
+    });
+    
+    // Batch menu button
+    batchMenuBtn.addEventListener('click', function() {
+        hideAllSections();
+        batchTrainingSection.style.display = 'block';
+        batchMenuBtn.classList.add('active');
+        showStatus('Select multiple emails in Gmail and enter a label');
+    });
+    
+    // Test menu button
+    testMenuBtn.addEventListener('click', function() {
+        hideAllSections();
+        testSection.style.display = 'block';
+        testMenuBtn.classList.add('active');
+        testInput.focus();
+        showStatus('Enter text to test the model');
+    });
+
     // Check server status
     checkServerBtn.addEventListener('click', async () => {
         try {
@@ -216,22 +281,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             showStatus('Cannot connect to server. Is it running?', true);
-        }
-    });
-
-    // Toggle training section when Train button is clicked
-    trainToggleBtn.addEventListener('click', () => {
-        trainToggleBtn.classList.toggle('active');
-        
-        if (trainingSection.style.display === 'none' || !trainingSection.style.display) {
-            trainingSection.style.display = 'block';
-            trainingSection.style.animation = 'slideDown 0.3s ease';
-        } else {
-            // First add a slide up animation, then hide the element
-            trainingSection.style.animation = 'slideDown 0.3s ease reverse';
-            setTimeout(() => {
-                trainingSection.style.display = 'none';
-            }, 280); // Slightly less than animation duration
         }
     });
 
@@ -321,6 +370,71 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             showStatus('Error: ' + error.message, true);
+        }
+    });
+
+    // Batch train button functionality
+    batchTrainBtn.addEventListener('click', async function() {
+        const label = batchLabelInput.value.trim();
+        if (!label) {
+            showStatus('Please enter a label for batch training', true);
+            return;
+        }
+
+        try {
+            // Reset UI
+            batchResults.style.display = 'none';
+            
+            // Get the active tab
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const tab = tabs[0];
+            
+            if (!tab.url.includes('mail.google.com')) {
+                showStatus('Please navigate to Gmail first', true);
+                return;
+            }
+            
+            // Start batch training
+            showStatus('Starting batch training...');
+            
+            // Show processing indicator
+            batchProcessingIndicator.style.display = 'block';
+            
+            // Send message to content script
+            chrome.tabs.sendMessage(tab.id, { 
+                action: 'batchTrain', 
+                label: label 
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    // Content script not loaded or other error
+                    injectContentScriptAndRetry(tab.id, { action: 'batchTrain', label: label });
+                    return;
+                }
+                
+                if (response && response.status === 'started') {
+                    showStatus('Batch training in progress...');
+                    batchTotalCount.textContent = response.totalEmails || '0';
+                    
+                    // Update UI when batch processing is complete
+                    chrome.runtime.onMessage.addListener(function batchTrainingListener(message) {
+                        if (message.action === 'batchTrainingUpdate') {
+                            batchProgressCount.textContent = message.processed;
+                        } else if (message.action === 'batchTrainingComplete') {
+                            chrome.runtime.onMessage.removeListener(batchTrainingListener);
+                            batchProcessingIndicator.style.display = 'none';
+                            batchResults.style.display = 'block';
+                            batchSuccessCount.textContent = message.successCount;
+                            showStatus('Batch training complete!');
+                        }
+                    });
+                } else {
+                    showStatus('Failed to start batch training: ' + (response ? response.error : 'Unknown error'), true);
+                    batchProcessingIndicator.style.display = 'none';
+                }
+            });
+        } catch (error) {
+            showStatus('Error: ' + error.message, true);
+            batchProcessingIndicator.style.display = 'none';
         }
     });
 

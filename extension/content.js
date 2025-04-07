@@ -396,6 +396,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(() => sendResponse({ success: true }))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; // Will respond asynchronously
+    } else if (request.action === 'batchTrain') {
+        const emails = getAllVisibleEmails();
+        if (emails && emails.length > 0) {
+            batchTrainEmails(emails, request.label, request.batchSize || 5);
+            sendResponse({ 
+                status: 'started', 
+                totalEmails: emails.length 
+            });
+        } else {
+            sendResponse({ 
+                status: 'error', 
+                error: 'No emails selected for batch training' 
+            });
+        }
     } else if (request.action === 'ping') {
         sendResponse({ pong: true });
     }
@@ -405,3 +419,186 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 chrome.runtime.sendMessage({ action: 'contentScriptLoaded' }, (response) => {
     console.log('Content script loaded confirmation sent');
 });
+
+// Batch train multiple emails with the same label
+async function batchTrainEmails(emails, label, batchSize) {
+    console.log(`Starting batch training of ${emails.length} emails with label: ${label}`);
+    
+    let processed = 0;
+    let successCount = 0;
+    
+    // Process emails in batches to avoid overwhelming the server
+    for (let i = 0; i < emails.length; i += batchSize) {
+        const batch = emails.slice(i, i + batchSize);
+        
+        // Process each email in the batch
+        for (const email of batch) {
+            try {
+                // Get the thread ID
+                const threadId = email.threadId;
+                if (!threadId) {
+                    console.error('No thread ID found for email');
+                    continue;
+                }
+                
+                // Get email content
+                const emailContent = await getEmailContentFromThreadId(threadId);
+                if (!emailContent || !emailContent.subject) {
+                    console.error('Could not get email content');
+                    continue;
+                }
+                
+                // Train the model with this email
+                const trainResult = await trainModel(emailContent, label);
+                
+                if (trainResult.success) {
+                    successCount++;
+                    
+                    // Apply the label using Gmail API
+                    try {
+                        await applyLabel(threadId, label);
+                    } catch (labelError) {
+                        console.error('Error applying label:', labelError);
+                    }
+                }
+            } catch (error) {
+                console.error('Error processing email for batch training:', error);
+            }
+            
+            // Update progress
+            processed++;
+            chrome.runtime.sendMessage({ 
+                action: 'batchTrainingUpdate', 
+                processed: processed 
+            });
+        }
+        
+        // Short delay between batches to prevent overloading
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    
+    // Notify completion
+    chrome.runtime.sendMessage({ 
+        action: 'batchTrainingComplete', 
+        processed: processed,
+        successCount: successCount
+    });
+    
+    console.log(`Batch training complete. ${successCount} of ${emails.length} emails trained successfully.`);
+}
+
+// Helper function to get email content from a thread ID
+async function getEmailContentFromThreadId(threadId) {
+    try {
+        // Navigate to thread if not already open
+        const currentThreadId = getThreadIdFromOpenEmail();
+        
+        if (currentThreadId !== threadId) {
+            // This is a simplification - in a real implementation, 
+            // you would need to either:
+            // 1. Fetch content via Gmail API without navigation, or
+            // 2. Use a more sophisticated approach to extract content from the DOM
+            console.log('Cannot get content of unopened email in batch mode');
+            
+            // For now, we'll extract what we can from the email list view
+            const emailRows = document.querySelectorAll('tr.zA');
+            for (const row of emailRows) {
+                const rowThreadId = row.getAttribute('data-thread-id');
+                if (rowThreadId === threadId) {
+                    // Extract subject from the row
+                    const subjectEl = row.querySelector('.y6');
+                    const bodyPreviewEl = row.querySelector('.y2');
+                    
+                    if (subjectEl && bodyPreviewEl) {
+                        return {
+                            subject: subjectEl.innerText || '',
+                            body: bodyPreviewEl.innerText || '',
+                            snippetOnly: true
+                        };
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
+        // If we're already on the thread, get the content normally
+        return getEmailContent();
+    } catch (error) {
+        console.error('Error getting email content from thread ID:', error);
+        return null;
+    }
+}
+
+// Helper function to get the thread ID from the URL of an open email
+function getThreadIdFromOpenEmail() {
+    try {
+        // Extract thread ID from URL
+        const urlMatch = window.location.href.match(/[/#](?:inbox|all|sent|trash|spam)\/([a-zA-Z0-9]+)/);
+        if (urlMatch && urlMatch[1]) {
+            return urlMatch[1];
+        }
+        
+        // Fallback: try to get from DOM
+        const threadIdElement = document.querySelector('h2[data-thread-perm-id]');
+        if (threadIdElement) {
+            return threadIdElement.getAttribute('data-thread-perm-id');
+        }
+        
+        console.error('Could not find thread ID in URL or DOM');
+        return null;
+    } catch (error) {
+        console.error('Error getting thread ID from open email:', error);
+        return null;
+    }
+}
+
+// Function to train the model with email content and a label
+async function trainModel(emailContent, label) {
+    try {
+        if (!emailContent || !emailContent.subject) {
+            console.error('Invalid email content for training');
+            return { success: false, error: 'Invalid email content' };
+        }
+        
+        console.log(`Training model with label: ${label}`);
+        
+        // Combine subject and body for training
+        const text = `${emailContent.subject}\n${emailContent.body}`;
+        
+        // Call the server to train the model
+        const response = await fetch('http://localhost:5050/train', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: text,
+                label: label
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('Training error:', error);
+            return { 
+                success: false, 
+                error: error.error || 'Failed to train model' 
+            };
+        }
+        
+        const result = await response.json();
+        console.log('Training result:', result);
+        
+        return { 
+            success: true, 
+            result: result 
+        };
+    } catch (error) {
+        console.error('Error in trainModel:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+}
