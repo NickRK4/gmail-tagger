@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const testResult = document.getElementById('test-result');
     const predictionLabel = document.getElementById('prediction-label');
     const predictionConfidence = document.getElementById('prediction-confidence');
+    const resetModelBtn = document.getElementById('reset-model-btn');
     const openGmailBtn = document.createElement('button');
     
     openGmailBtn.textContent = 'Open Gmail';
@@ -323,6 +324,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Reset model button functionality
+    resetModelBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to reset the model? This will delete all training data.')) {
+            return;
+        }
+        
+        try {
+            // Call reset API
+            const response = await fetch('http://localhost:5050/reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                showStatus(result.message);
+                
+                // Clear test results if showing
+                testResult.style.display = 'none';
+                testInput.value = '';
+            } else {
+                // Handle API error
+                const error = await response.json();
+                showStatus('Reset failed: ' + (error.error || response.statusText), true);
+            }
+        } catch (error) {
+            showStatus('Error: ' + error.message, true);
+        }
+    });
+
     // Test button functionality
     testBtn.addEventListener('click', async () => {
         const text = testInput.value.trim();
@@ -339,7 +372,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ 
-                    text: text 
+                    text: text,
+                    isModelTest: true
                 })
             });
             
@@ -366,9 +400,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     predictionConfidence.textContent = confidence;
                 } else {
-                    // Handle unexpected response
-                    predictionLabel.textContent = 'Unable to classify';
-                    predictionConfidence.textContent = 'The model could not make a prediction';
+                    // No confident prediction available
+                    predictionLabel.textContent = 'Model cannot determine label';
+                    
+                    // Format confidence as percentage if available
+                    const confidence = prediction.confidence ? 
+                        'Low confidence: ' + (prediction.confidence * 100).toFixed(1) + '%' : 
+                        'Unable to calculate confidence';
+                    
+                    predictionConfidence.textContent = confidence;
                     predictionLabel.style.color = '#5f6368';
                 }
             } else {

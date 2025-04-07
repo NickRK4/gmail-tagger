@@ -88,5 +88,26 @@ def train_model():
         app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/reset', methods=['POST'])
+def reset_model():
+    try:
+        success = classifier.reset_model()
+        
+        if success:
+            return jsonify({
+                'status': 'success', 
+                'message': 'Model has been reset successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error', 
+                'message': 'Failed to reset model'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error in reset: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5050)  # Changed to port 5050 to avoid conflicts
