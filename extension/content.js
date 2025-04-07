@@ -250,10 +250,25 @@ function getAllVisibleEmails() {
                         break;
                     }
                 }
+                
+                // If still no thread ID, try to get from other links
+                if (!threadId) {
+                    const allLinks = row.querySelectorAll('a');
+                    for (const link of allLinks) {
+                        const match = link.href.match(/\/([a-zA-Z0-9]+)$/);
+                        if (match && match[1] && match[1].length > 10) {
+                            threadId = match[1];
+                            break;
+                        }
+                    }
+                }
             }
             
-            // Skip if no thread ID found
-            if (!threadId) continue;
+            // Use a fallback ID if none found
+            if (!threadId) {
+                threadId = 'email_' + i;
+                console.log('Using fallback ID for email', i);
+            }
             
             // Get the email subject and any visible content
             const subject = row.querySelector('.y6, .bog') ? 
@@ -262,14 +277,17 @@ function getAllVisibleEmails() {
             const snippet = row.querySelector('.y2, .yX') ? 
                        row.querySelector('.y2, .yX').textContent.trim() : '';
             
-            // Combine subject and snippet for content
-            const content = `${subject}\n${snippet}`;
+            // If no specific content found, use the entire row content
+            const content = (subject || snippet) ? 
+                `${subject}\n${snippet}` : row.textContent.trim();
             
             emails.push({
                 threadId,
                 content
             });
         }
+        
+        console.log(`Processed ${emails.length} emails for classification`);
     } catch (error) {
         console.error('Error getting visible emails:', error);
     }

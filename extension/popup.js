@@ -215,10 +215,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Toggle training section when Train button is clicked
     trainToggleBtn.addEventListener('click', () => {
+        trainToggleBtn.classList.toggle('active');
+        
         if (trainingSection.style.display === 'none' || !trainingSection.style.display) {
             trainingSection.style.display = 'block';
+            trainingSection.style.animation = 'slideDown 0.3s ease';
         } else {
-            trainingSection.style.display = 'none';
+            // First add a slide up animation, then hide the element
+            trainingSection.style.animation = 'slideDown 0.3s ease reverse';
+            setTimeout(() => {
+                trainingSection.style.display = 'none';
+            }, 280); // Slightly less than animation duration
         }
     });
 
