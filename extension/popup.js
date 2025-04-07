@@ -29,52 +29,55 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function checkIfContentScriptLoaded(tabId) {
-        return new Promise((resolve) => {
-            chrome.tabs.sendMessage(tabId, { action: 'ping' }, response => {
-                resolve(!chrome.runtime.lastError && response && response.pong);
-            });
-        });
-    }
-
-    async function injectContentScriptIfNeeded(tab) {
-        // Check if we're on Gmail
-        if (!tab.url || !tab.url.includes('mail.google.com')) {
-            throw new Error('Please navigate to Gmail to use this extension');
+        try {
+            const response = await chrome.tabs.sendMessage(tabId, { action: 'ping' });
+            return response && response.pong;
+        } catch (error) {
+            return false;
         }
-        
-        // Check if content script is already loaded
-        const isLoaded = await checkIfContentScriptLoaded(tab.id);
-        if (isLoaded) return;
-        
-        // Inject content script if not loaded
-        await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content.js']
-        });
-        
-        // Wait a bit for the script to initialize
-        await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     async function getEmailContent() {
         try {
             const tab = await getCurrentTab();
             
-            // Make sure content script is loaded
-            await injectContentScriptIfNeeded(tab);
-            
-            // Send message with error handling
-            return new Promise((resolve, reject) => {
-                chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (!response) {
-                        reject(new Error('No email content found'));
-                    } else {
-                        resolve(response);
-                    }
+            // Check if we're on Gmail
+            if (!tab.url || !tab.url.includes('mail.google.com')) {
+                throw new Error('Please navigate to Gmail to use this extension');
+            }
+
+            // Try to get email content first
+            try {
+                const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
+                if (response) {
+                    return response;
+                }
+            } catch (error) {
+                // Content script not loaded, continue to injection
+            }
+
+            // Inject content script
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['content.js']
                 });
-            });
+                
+                // Wait a bit for the script to initialize
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Try getting email content again
+                const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
+                if (response) {
+                    return response;
+                }
+                throw new Error('No email content found');
+            } catch (error) {
+                if (error.message.includes('Cannot access contents of url')) {
+                    throw new Error('Please refresh the Gmail page to use the extension');
+                }
+                throw error;
+            }
         } catch (error) {
             throw error;
         }

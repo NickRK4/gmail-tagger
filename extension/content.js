@@ -1,19 +1,44 @@
 // Log when content script is loaded
 console.log('Gmail Label Classifier content script loaded');
 
+async function getGmailToken() {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ action: 'getAuthToken' }, response => {
+            if (response.error) {
+                reject(new Error(response.error.message));
+                return;
+            }
+            resolve(response.token);
+        });
+    });
+}
+
 function getEmailContent() {
     try {
-        // Gmail specific selectors to get email content
-        const emailBody = document.querySelector('.a3s.aiL');
-        const subject = document.querySelector('h2.hP');
+        // Try to get thread ID first
+        const threadIdElement = document.querySelector('h2[data-thread-perm-id]');
+        const threadId = threadIdElement ? threadIdElement.getAttribute('data-thread-perm-id') : null;
         
-        if (!emailBody && !subject) {
-            return null;
+        if (!threadId) {
+            // Try getting from URL
+            const urlMatch = window.location.href.match(/[/#](?:inbox|all|sent|trash|spam)\/([a-zA-Z0-9]+)/);
+            if (!urlMatch || !urlMatch[1]) {
+                console.error('Could not find thread ID');
+                return null;
+            }
+            threadId = urlMatch[1];
         }
+        
+        // Get email body and subject
+        const emailBody = document.querySelector('.a3s.aiL');
+        const subject = threadIdElement || document.querySelector('h2.hP');
+        
+        console.log('Found thread ID:', threadId);
         
         return {
             body: emailBody ? emailBody.innerText : '',
-            subject: subject ? subject.innerText : ''
+            subject: subject ? subject.innerText : '',
+            threadId: threadId
         };
     } catch (error) {
         console.error('Error getting email content:', error);
@@ -21,151 +46,158 @@ function getEmailContent() {
     }
 }
 
-async function getGmailToken() {
-    return new Promise((resolve, reject) => {
-        chrome.identity.getAuthToken({ interactive: true }, function(token) {
-            if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
-                return;
-            }
-            resolve(token);
-        });
-    });
-}
-
-async function createLabel(token, labelName) {
+async function findOrCreateLabel(token, labelName) {
     try {
+        console.log('Finding or creating label:', labelName);
+        
+        // First try to find the label
         const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('Failed to fetch labels:', error);
+            throw new Error(`Failed to fetch labels: ${error.error?.message || 'Unknown error'}`);
+        }
+        
+        const data = await response.json();
+        const existingLabel = data.labels.find(l => l.name === labelName);
+        
+        if (existingLabel) {
+            console.log('Found existing label:', existingLabel);
+            return existingLabel.id;
+        }
+        
+        // If label doesn't exist, create it
+        const createResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 name: labelName,
                 labelListVisibility: 'labelShow',
-                messageListVisibility: 'show'
+                messageListVisibility: 'show',
+                type: 'user'
             })
         });
-
-        if (!response.ok) {
-            const error = await response.json();
+        
+        if (!createResponse.ok) {
+            const error = await createResponse.json();
             console.error('Error creating label:', error);
-            return null;
+            throw new Error(`Failed to create label: ${error.error?.message || 'Unknown error'}`);
         }
-
-        return await response.json();
+        
+        const newLabel = await createResponse.json();
+        console.log('Created new label:', newLabel);
+        return newLabel.id;
     } catch (error) {
-        console.error('Error creating label:', error);
-        return null;
+        console.error('Error in findOrCreateLabel:', error);
+        throw error;
     }
 }
 
-async function getMessageId() {
-    // Get the current URL
-    const url = window.location.href;
-    const match = url.match(/\#inbox\/([^\/]+)/);
-    if (match && match[1]) {
-        return match[1];
+async function refreshGmailUI() {
+    // Find the refresh button in Gmail's UI
+    const refreshButton = document.querySelector('button[aria-label="Refresh"]');
+    if (refreshButton) {
+        refreshButton.click();
+        return true;
     }
-    return null;
+    
+    // Fallback: Try to find the refresh button by its icon
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const refreshIconButton = buttons.find(button => 
+        button.innerHTML.includes('refresh') || 
+        button.querySelector('div[aria-label="Refresh"]')
+    );
+    
+    if (refreshIconButton) {
+        refreshIconButton.click();
+        return true;
+    }
+    
+    return false;
 }
 
-async function applyLabel(label) {
+async function applyLabel(labelName) {
     try {
-        console.log('Starting label application for:', label);
+        console.log('Starting label application for:', labelName);
+        
+        // Get email content which includes thread ID
+        const emailContent = getEmailContent();
+        if (!emailContent || !emailContent.threadId) {
+            throw new Error('Could not get thread ID from email');
+        }
         
         // Get auth token
         const token = await getGmailToken();
         if (!token) {
             throw new Error('Could not get authentication token');
         }
-
-        // Get message ID
-        const messageId = await getMessageId();
-        if (!messageId) {
-            throw new Error('Could not get message ID');
-        }
-
-        // First try to create the label (if it doesn't exist, this will create it)
-        const labelData = await createLabel(token, label);
-        const labelId = labelData ? labelData.id : null;
-
-        if (!labelId) {
-            // If creation failed, try to find existing label
-            const labelsResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            const labels = await labelsResponse.json();
-            const existingLabel = labels.labels.find(l => l.name === label);
-            if (!existingLabel) {
-                throw new Error('Could not create or find label');
-            }
-            labelId = existingLabel.id;
-        }
-
-        // Apply the label to the message
-        const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`, {
+        
+        console.log('Got thread ID:', emailContent.threadId);
+        
+        // Get or create label
+        const labelId = await findOrCreateLabel(token, labelName);
+        console.log('Got label ID:', labelId);
+        
+        // Apply label to thread using the correct endpoint
+        const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${emailContent.threadId}/modify`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                addLabelIds: [labelId]
+                addLabelIds: [labelId],
+                removeLabelIds: []
             })
         });
-
+        
         if (!response.ok) {
-            throw new Error('Failed to apply label');
+            const error = await response.json();
+            console.error('Error applying label. Status:', response.status);
+            console.error('Error details:', error);
+            throw new Error(`Failed to apply label: ${error.error?.message || 'Unknown error'}`);
         }
-
-        console.log('Successfully applied label:', label);
+        
+        const result = await response.json();
+        console.log('Successfully applied label, response:', result);
+        
+        // Refresh the UI to show the new label
+        setTimeout(() => {
+            refreshGmailUI();
+        }, 500); // Small delay to ensure the label is applied before refreshing
+        
         return true;
     } catch (error) {
         console.error('Error in applyLabel:', error);
-        return false;
+        throw error;
     }
 }
 
-// Keep track of processed emails to avoid duplicates
-const processedEmails = new Set();
-
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('Message received in content script:', request);
-    
-    // Respond to ping to check if content script is loaded
-    if (request.action === 'ping') {
-        sendResponse({ pong: true });
-        return true;
-    }
-    
     if (request.action === 'getEmailContent') {
         const content = getEmailContent();
-        console.log('Email content retrieved:', content);
         sendResponse(content);
-        return true;
-    }
-    
-    if (request.action === 'applyLabel') {
-        console.log('Applying label from popup:', request.label);
+    } else if (request.action === 'applyLabel') {
         applyLabel(request.label)
-            .then(() => {
-                console.log('Label applied successfully');
-                sendResponse({ success: true });
-            })
-            .catch(error => {
-                console.error('Error applying label:', error);
-                sendResponse({ success: false, error: error.message });
-            });
-        return true; // Important: return true to indicate async response
+            .then(() => sendResponse({ success: true }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true; // Will respond asynchronously
+    } else if (request.action === 'ping') {
+        sendResponse({ pong: true });
     }
-    
-    return true; // Required for async response
 });
+
+// Keep track of processed emails to avoid duplicates
+const processedEmails = new Set();
 
 // Listen for new emails and classify them
 const observer = new MutationObserver(() => {

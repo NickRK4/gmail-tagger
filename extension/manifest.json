@@ -6,10 +6,11 @@
   "permissions": [
     "activeTab",
     "storage",
-    "identity"
+    "identity",
+    "scripting"
   ],
   "oauth2": {
-    "client_id": "${YOUR_CLIENT_ID}",
+    "client_id": "177733699411-0km7lv848obgu443jbqjg47l7loab99g.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/gmail.labels",
       "https://www.googleapis.com/auth/gmail.modify"
@@ -17,29 +18,19 @@
   },
   "host_permissions": [
     "https://mail.google.com/*",
-    "https://www.googleapis.com/*"
+    "https://gmail.googleapis.com/*",
+    "http://localhost:5050/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_popup": "popup.html"
   },
   "content_scripts": [
     {
       "matches": ["https://mail.google.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
+      "js": ["content.js"]
     }
-  ],
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  }
+  ]
 }
