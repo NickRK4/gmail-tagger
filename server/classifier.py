@@ -72,6 +72,30 @@ class EmailClassifier:
                 
             if not text:
                 raise ValueError("Text cannot be empty")
+            
+            prediction, confidence = self.predict_with_confidence(text)
+            
+            # Only return prediction if confidence is high enough
+            if confidence >= 0.6:  # 60% confidence threshold
+                return prediction
+            return None
+            
+        except Exception as e:
+            print(f"Error during prediction: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+            
+    def predict_with_confidence(self, text):
+        """Predict label for new text and return the confidence score."""
+        try:
+            # If model not trained yet
+            if not self.is_trained:
+                print("Model not trained yet or insufficient training data")
+                return None, 0.0
+                
+            if not text:
+                raise ValueError("Text cannot be empty")
                 
             # Transform new text using vectorizer
             X = self.vectorizer.transform([text])
@@ -81,20 +105,16 @@ class EmailClassifier:
             
             # Get prediction probability
             probas = self.classifier.predict_proba(X)[0]
-            max_proba = np.max(probas)
+            max_proba = float(np.max(probas))
             
-            print(f"Prediction: {prediction}, Confidence: {max_proba}")
-            
-            # Only return prediction if confidence is high enough
-            if max_proba >= 0.6:  # 60% confidence threshold
-                return prediction
-            return None
+            print(f"Prediction: {prediction}, Confidence: {max_proba:.4f}")
+            return prediction, max_proba
             
         except Exception as e:
-            print(f"Error during prediction: {str(e)}")
+            print(f"Error during prediction with confidence: {str(e)}")
             import traceback
             traceback.print_exc()
-            return None
+            return None, 0.0
 
     def save_model(self):
         """Save model and data to disk."""

@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const processingIndicator = document.getElementById('processing-indicator');
     const progressCount = document.getElementById('progress-count');
     const totalCount = document.getElementById('total-count');
+    const testBtn = document.getElementById('test-btn');
+    const testInput = document.getElementById('test-input');
+    const testResult = document.getElementById('test-result');
+    const predictionLabel = document.getElementById('prediction-label');
+    const predictionConfidence = document.getElementById('prediction-confidence');
     const openGmailBtn = document.createElement('button');
     
     openGmailBtn.textContent = 'Open Gmail';
@@ -315,6 +320,66 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (error) {
             showStatus('Error: ' + error.message, true);
+        }
+    });
+
+    // Test button functionality
+    testBtn.addEventListener('click', async () => {
+        const text = testInput.value.trim();
+        if (!text) {
+            showStatus('Please enter text to classify', true);
+            return;
+        }
+
+        try {
+            // Call prediction API
+            const response = await fetch('http://localhost:5050/predict', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    text: text 
+                })
+            });
+            
+            if (response.ok) {
+                const prediction = await response.json();
+                
+                // Show result
+                testResult.style.display = 'block';
+                
+                if (prediction.error && prediction.error.includes('at least 2 different labels')) {
+                    // Model not trained with enough labels
+                    predictionLabel.textContent = 'Insufficient training data';
+                    predictionConfidence.textContent = 'The model needs at least 2 different labels to make predictions';
+                    predictionLabel.style.color = '#a94442';
+                } else if (prediction.label) {
+                    // Show prediction and confidence
+                    predictionLabel.textContent = prediction.label;
+                    predictionLabel.style.color = '#4285f4';
+                    
+                    // Format confidence as percentage
+                    const confidence = prediction.confidence ? 
+                        (prediction.confidence * 100).toFixed(1) + '%' : 
+                        'Not available';
+                    
+                    predictionConfidence.textContent = confidence;
+                } else {
+                    // Handle unexpected response
+                    predictionLabel.textContent = 'Unable to classify';
+                    predictionConfidence.textContent = 'The model could not make a prediction';
+                    predictionLabel.style.color = '#5f6368';
+                }
+            } else {
+                // Handle API error
+                const error = await response.json();
+                showStatus('Prediction failed: ' + (error.error || response.statusText), true);
+                testResult.style.display = 'none';
+            }
+        } catch (error) {
+            showStatus('Error: ' + error.message, true);
+            testResult.style.display = 'none';
         }
     });
 

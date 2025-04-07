@@ -18,8 +18,8 @@ def predict_label():
     try:
         data = request.json
         
-        # Check if this is a test request from the popup
-        if data.get('text') == 'test':
+        # Check if this is a simple server check request
+        if data.get('text') == 'test' and not data.get('isModelTest'):
             return jsonify({'status': 'Server is running'})
             
         email_text = data.get('text', '')
@@ -27,19 +27,28 @@ def predict_label():
         if not email_text:
             return jsonify({'error': 'No email text provided'}), 400
             
-        # Check if model is trained
-        if not classifier.is_trained:
+        # Check if model has enough training data
+        unique_labels = set(classifier.labels)
+        if len(unique_labels) < 2:
             return jsonify({
-                'label': None, 
-                'message': 'Model not trained yet. Please train with at least two different labels.'
+                'error': 'Need at least 2 different labels to train a classifier',
+                'trained_labels': list(unique_labels)
             })
             
-        prediction = classifier.predict(email_text)
+        # Get prediction with confidence
+        prediction, confidence = classifier.predict_with_confidence(email_text)
         
         if prediction:
-            return jsonify({'label': prediction})
+            return jsonify({
+                'label': prediction,
+                'confidence': confidence
+            })
         else:
-            return jsonify({'label': None, 'message': 'No confident prediction available'})
+            return jsonify({
+                'label': None, 
+                'message': 'No confident prediction available',
+                'confidence': confidence
+            })
             
     except Exception as e:
         app.logger.error(f"Error in predict: {str(e)}")

@@ -78,6 +78,45 @@
       border-radius: 4px;
       text-align: center;
     }
+    #test-section {
+      margin-top: 15px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    #test-input {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      box-sizing: border-box;
+      min-height: 60px;
+      resize: vertical;
+      font-family: Arial, sans-serif;
+    }
+    #test-result {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      display: none;
+    }
+    .prediction {
+      font-weight: bold;
+      color: #4285f4;
+    }
+    .confidence {
+      color: #5f6368;
+      font-size: 0.9em;
+    }
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .section-heading h3 {
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -97,6 +136,18 @@
     <h3>Train Model</h3>
     <input type="text" id="label-input" class="label-input" placeholder="Enter label name">
     <button id="train-btn">Train Current Email</button>
+  </div>
+  
+  <div id="test-section">
+    <div class="section-heading">
+      <h3>Test Model</h3>
+    </div>
+    <textarea id="test-input" placeholder="Enter text to classify..."></textarea>
+    <button id="test-btn">Test</button>
+    <div id="test-result">
+      <div>Prediction: <span id="prediction-label" class="prediction"></span></div>
+      <div>Confidence: <span id="prediction-confidence" class="confidence"></span></div>
+    </div>
   </div>
   
   <hr>
