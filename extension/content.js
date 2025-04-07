@@ -214,6 +214,103 @@ async function predictAndApplyLabel(emailContent) {
     }
 }
 
+// Function to get all visible emails in the inbox
+function getAllVisibleEmails() {
+    const emails = [];
+    try {
+        // Try different selectors for different Gmail views
+        const emailRows = document.querySelectorAll([
+            // Inbox view
+            'div[role="main"] div[role="list"] div[role="listitem"]',
+            // Other views
+            'table.F tr.zA',
+            // Conversation view
+            'div.adn.ads'
+        ].join(', '));
+        
+        console.log(`Found ${emailRows.length} email rows`);
+        
+        // Process only up to 50 emails
+        const maxEmails = Math.min(emailRows.length, 50);
+        
+        for (let i = 0; i < maxEmails; i++) {
+            const row = emailRows[i];
+            
+            // Try to get thread ID first - check for data attribute
+            let threadId = row.getAttribute('data-thread-perm-id');
+            
+            // If no thread ID found, try to find it in links or other attributes
+            if (!threadId) {
+                // Look for links with thread IDs in the URL
+                const links = row.querySelectorAll('a[href*="#inbox/"]');
+                for (const link of links) {
+                    const match = link.href.match(/[/#](?:inbox|all|sent|trash|spam)\/([a-zA-Z0-9]+)/);
+                    if (match && match[1]) {
+                        threadId = match[1];
+                        break;
+                    }
+                }
+            }
+            
+            // Skip if no thread ID found
+            if (!threadId) continue;
+            
+            // Get the email subject and any visible content
+            const subject = row.querySelector('.y6, .bog') ? 
+                       row.querySelector('.y6, .bog').textContent.trim() : '';
+                       
+            const snippet = row.querySelector('.y2, .yX') ? 
+                       row.querySelector('.y2, .yX').textContent.trim() : '';
+            
+            // Combine subject and snippet for content
+            const content = `${subject}\n${snippet}`;
+            
+            emails.push({
+                threadId,
+                content
+            });
+        }
+    } catch (error) {
+        console.error('Error getting visible emails:', error);
+    }
+    
+    return emails;
+}
+
+// Function to apply a label to a specific thread ID
+async function applyLabelToEmail(threadId, labelName) {
+    try {
+        // Get authentication token
+        const token = await getGmailToken();
+        
+        // Find or create the label
+        const labelId = await findOrCreateLabel(token, labelName);
+        
+        // Apply label to specific thread
+        const applyResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}/modify`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                addLabelIds: [labelId]
+            })
+        });
+        
+        if (!applyResponse.ok) {
+            const error = await applyResponse.json();
+            console.error('Error applying label to thread:', error);
+            throw new Error(`Failed to apply label: ${error.error?.message || 'Unknown error'}`);
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error in applyLabelToEmail:', error);
+        throw error;
+    }
+}
+
 // Keep track of processed emails to avoid duplicates
 const processedEmails = new Set();
 
@@ -270,6 +367,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse(content);
     } else if (request.action === 'applyLabel') {
         applyLabel(request.label)
+            .then(() => sendResponse({ success: true }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true; // Will respond asynchronously
+    } else if (request.action === 'getAllVisibleEmails') {
+        const emails = getAllVisibleEmails();
+        sendResponse({ emails });
+    } else if (request.action === 'applyLabelToEmail') {
+        applyLabelToEmail(request.threadId, request.label)
             .then(() => sendResponse({ success: true }))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; // Will respond asynchronously

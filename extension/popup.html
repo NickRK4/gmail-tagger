@@ -22,7 +22,6 @@
       color: #a94442;
     }
     button {
-      width: 100%;
       padding: 8px;
       margin: 5px 0;
       background-color: #4285f4;
@@ -40,16 +39,49 @@
       margin: 5px 0;
       box-sizing: border-box;
     }
+    .button-container {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .button-container button {
+      flex: 1;
+    }
+    #training-section {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .processing-indicator {
+      margin: 10px 0;
+      padding: 5px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
   <h2>Gmail Label Classifier</h2>
   <div id="status" class="status"></div>
+  
+  <div class="button-container">
+    <button id="train-toggle-btn">Train</button>
+    <button id="apply-btn">Apply</button>
+  </div>
+  
+  <div id="processing-indicator" class="processing-indicator" style="display:none;">
+    Processing emails: <span id="progress-count">0</span> of <span id="total-count">0</span>
+  </div>
+  
   <div id="training-section">
     <h3>Train Model</h3>
     <input type="text" id="label-input" class="label-input" placeholder="Enter label name">
     <button id="train-btn">Train Current Email</button>
   </div>
+  
   <hr>
   <button id="check-server">Check Server Status</button>
   <script src="popup.js"></script>
