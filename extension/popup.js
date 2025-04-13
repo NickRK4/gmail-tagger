@@ -65,6 +65,35 @@ document.addEventListener('DOMContentLoaded', function() {
             return false;
         }
     }
+    
+    // Function to inject content script and retry an operation
+    async function injectContentScriptAndRetry(tabId, message) {
+        console.log('Injecting content script and retrying operation');
+        
+        try {
+            // Inject the content script
+            await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: ['content.js']
+            });
+            
+            // Wait a moment for the script to initialize
+            setTimeout(() => {
+                // Retry the operation
+                chrome.tabs.sendMessage(tabId, message, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Failed to execute after injection:', chrome.runtime.lastError);
+                        showStatus('Failed to execute operation: ' + chrome.runtime.lastError.message, true);
+                    } else {
+                        console.log('Operation retried successfully after injection');
+                    }
+                });
+            }, 500);
+        } catch (error) {
+            console.error('Error injecting content script:', error);
+            showStatus('Failed to inject content script: ' + error.message, true);
+        }
+    }
 
     async function getEmailContent() {
         try {

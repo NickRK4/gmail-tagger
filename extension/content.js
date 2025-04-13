@@ -230,16 +230,54 @@ function getAllVisibleEmails(selectedOnly = false) {
         
         // If we only want selected emails, filter for those with the selected attribute or class
         if (selectedOnly) {
-            // Convert NodeList to Array to use filter
-            emailRows = Array.from(emailRows).filter(row => {
-                // Check for various indicators of selection in Gmail
-                return (
-                    row.getAttribute('aria-selected') === 'true' || // Modern Gmail
-                    row.classList.contains('x7') || // Some Gmail views
-                    row.querySelector('input[type="checkbox"]:checked') !== null || // Checkbox selected
-                    row.hasAttribute('selected') // Legacy attribute
-                );
-            });
+            console.log('Looking for selected emails...');
+            
+            // First try Gmail's checkbox selection system
+            const checkboxes = document.querySelectorAll('div[role="checkbox"][aria-checked="true"]');
+            if (checkboxes.length > 0) {
+                console.log(`Found ${checkboxes.length} selected checkboxes`);
+                
+                // For each selected checkbox, find the parent email row
+                const selectedRows = [];
+                checkboxes.forEach(checkbox => {
+                    // Navigate up to find the listitem (modern Gmail) or row (older Gmail)
+                    let parent = checkbox.parentElement;
+                    while (parent && 
+                          !parent.matches('div[role="listitem"]') && 
+                          !parent.matches('tr.zA') &&
+                          parent !== document.body) {
+                        parent = parent.parentElement;
+                    }
+                    
+                    if (parent && (parent.matches('div[role="listitem"]') || parent.matches('tr.zA'))) {
+                        selectedRows.push(parent);
+                        console.log('Found selected row:', parent);
+                    }
+                });
+                
+                if (selectedRows.length > 0) {
+                    emailRows = selectedRows;
+                }
+            } else {
+                // Fallback to other selection indicators
+                emailRows = Array.from(emailRows).filter(row => {
+                    // Check for various indicators of selection in Gmail
+                    const isSelected = (
+                        row.getAttribute('aria-selected') === 'true' || // Modern Gmail
+                        row.classList.contains('x7') || // Some Gmail views
+                        row.querySelector('input[type="checkbox"]:checked') !== null || // Checkbox selected
+                        row.hasAttribute('selected') || // Legacy attribute
+                        row.classList.contains('aps') || // Another selection class
+                        row.getAttribute('data-selected') === 'true' // Data attribute
+                    );
+                    
+                    if (isSelected) {
+                        console.log('Found selected row with class:', row.className);
+                    }
+                    
+                    return isSelected;
+                });
+            }
         }
         
         console.log(`Found ${emailRows.length} email rows${selectedOnly ? ' (selected)' : ''}`);
@@ -256,7 +294,7 @@ function getAllVisibleEmails(selectedOnly = false) {
             // If no thread ID found, try to find it in links or other attributes
             if (!threadId) {
                 // Look for links with thread IDs in the URL
-                const links = row.querySelectorAll('a[href*="#inbox/"]');
+                const links = row.querySelectorAll('a[href*="#inbox/"], a[href*="#all/"], a[href*="#sent/"], a[href*="#trash/"], a[href*="#spam/"]');
                 for (const link of links) {
                     const match = link.href.match(/[/#](?:inbox|all|sent|trash|spam)\/([a-zA-Z0-9]+)/);
                     if (match && match[1]) {
@@ -276,6 +314,15 @@ function getAllVisibleEmails(selectedOnly = false) {
                         }
                     }
                 }
+                
+                // Try to find thread ID in data attributes of child elements
+                if (!threadId) {
+                    const elements = row.querySelectorAll('[data-legacy-thread-id], [data-thread-id]');
+                    for (const el of elements) {
+                        threadId = el.getAttribute('data-legacy-thread-id') || el.getAttribute('data-thread-id');
+                        if (threadId) break;
+                    }
+                }
             }
             
             // Use a fallback ID if none found
@@ -285,11 +332,28 @@ function getAllVisibleEmails(selectedOnly = false) {
             }
             
             // Get the email subject and any visible content
-            const subject = row.querySelector('.y6, .bog') ? 
-                       row.querySelector('.y6, .bog').textContent.trim() : '';
-                       
-            const snippet = row.querySelector('.y2, .yX') ? 
-                       row.querySelector('.y2, .yX').textContent.trim() : '';
+            let subject = '';
+            let snippet = '';
+            
+            // Try multiple selectors for subject
+            const subjectSelectors = ['.y6', '.bog', '.bqe', '.y2', 'span[data-thread-id]', 'span.bA4', 'span.bqf'];
+            for (const selector of subjectSelectors) {
+                const el = row.querySelector(selector);
+                if (el) {
+                    subject = el.textContent.trim();
+                    break;
+                }
+            }
+            
+            // Try multiple selectors for snippet
+            const snippetSelectors = ['.y2', '.yX', '.xY', '.xW', '.a4W', 'span.bx4'];
+            for (const selector of snippetSelectors) {
+                const el = row.querySelector(selector);
+                if (el) {
+                    snippet = el.textContent.trim();
+                    break;
+                }
+            }
             
             // If no specific content found, use the entire row content
             const content = (subject || snippet) ? 
