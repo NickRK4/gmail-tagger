@@ -215,11 +215,11 @@ async function predictAndApplyLabel(emailContent) {
 }
 
 // Function to get all visible emails in the inbox
-function getAllVisibleEmails() {
+function getAllVisibleEmails(selectedOnly = false) {
     const emails = [];
     try {
         // Try different selectors for different Gmail views
-        const emailRows = document.querySelectorAll([
+        let emailRows = document.querySelectorAll([
             // Inbox view
             'div[role="main"] div[role="list"] div[role="listitem"]',
             // Other views
@@ -228,7 +228,21 @@ function getAllVisibleEmails() {
             'div.adn.ads'
         ].join(', '));
         
-        console.log(`Found ${emailRows.length} email rows`);
+        // If we only want selected emails, filter for those with the selected attribute or class
+        if (selectedOnly) {
+            // Convert NodeList to Array to use filter
+            emailRows = Array.from(emailRows).filter(row => {
+                // Check for various indicators of selection in Gmail
+                return (
+                    row.getAttribute('aria-selected') === 'true' || // Modern Gmail
+                    row.classList.contains('x7') || // Some Gmail views
+                    row.querySelector('input[type="checkbox"]:checked') !== null || // Checkbox selected
+                    row.hasAttribute('selected') // Legacy attribute
+                );
+            });
+        }
+        
+        console.log(`Found ${emailRows.length} email rows${selectedOnly ? ' (selected)' : ''}`);
         
         // Process only up to 50 emails
         const maxEmails = Math.min(emailRows.length, 50);
@@ -237,7 +251,7 @@ function getAllVisibleEmails() {
             const row = emailRows[i];
             
             // Try to get thread ID first - check for data attribute
-            let threadId = row.getAttribute('data-thread-perm-id');
+            let threadId = row.getAttribute('data-thread-perm-id') || row.getAttribute('data-thread-id');
             
             // If no thread ID found, try to find it in links or other attributes
             if (!threadId) {
@@ -287,7 +301,7 @@ function getAllVisibleEmails() {
             });
         }
         
-        console.log(`Processed ${emails.length} emails for classification`);
+        console.log(`Processed ${emails.length} emails for classification${selectedOnly ? ' (selected)' : ''}`);
     } catch (error) {
         console.error('Error getting visible emails:', error);
     }
@@ -397,7 +411,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true; // Will respond asynchronously
     } else if (request.action === 'batchTrain') {
-        const emails = getAllVisibleEmails();
+        // Get only selected emails for batch training
+        const emails = getAllVisibleEmails(true);
         if (emails && emails.length > 0) {
             batchTrainEmails(emails, request.label, request.batchSize || 5);
             sendResponse({ 
@@ -441,25 +456,24 @@ async function batchTrainEmails(emails, label, batchSize) {
                     continue;
                 }
                 
-                // Get email content
-                const emailContent = await getEmailContentFromThreadId(threadId);
-                if (!emailContent || !emailContent.subject) {
-                    console.error('Could not get email content');
+                // Use the content we already have from the list view
+                // This avoids the need to navigate to each email
+                if (!email.content) {
+                    console.error('No content found for email');
                     continue;
                 }
+                
+                const emailContent = {
+                    subject: email.content.split('\n')[0] || '',
+                    body: email.content.split('\n').slice(1).join('\n') || '',
+                    threadId: threadId
+                };
                 
                 // Train the model with this email
                 const trainResult = await trainModel(emailContent, label);
                 
                 if (trainResult.success) {
                     successCount++;
-                    
-                    // Apply the label using Gmail API
-                    try {
-                        await applyLabel(threadId, label);
-                    } catch (labelError) {
-                        console.error('Error applying label:', labelError);
-                    }
                 }
             } catch (error) {
                 console.error('Error processing email for batch training:', error);
