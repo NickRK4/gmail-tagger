@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', function() {
         chrome.tabs.create({ url: 'https://mail.google.com' });
     });
 
+    // Function to show status message
     function showStatus(message, isError = false) {
         statusDiv.textContent = message;
         statusDiv.className = 'status ' + (isError ? 'error' : 'success');
@@ -50,6 +51,18 @@ document.addEventListener('DOMContentLoaded', function() {
             statusDiv.appendChild(document.createElement('br'));
             statusDiv.appendChild(openGmailBtn);
         }
+        
+        // Hide after 5 seconds if not an error
+        if (!isError) {
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+    }
+    
+    // Function to hide status messages
+    function hideStatus() {
+        statusDiv.style.display = 'none';
     }
 
     async function getCurrentTab() {
@@ -96,47 +109,43 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function getEmailContent() {
+        const tab = await getCurrentTab();
+        
+        // Check if we're on Gmail
+        if (!tab.url || !tab.url.includes('mail.google.com')) {
+            throw new Error('Please navigate to Gmail to use this extension');
+        }
+
+        // Try to get email content first
         try {
-            const tab = await getCurrentTab();
-            
-            // Check if we're on Gmail
-            if (!tab.url || !tab.url.includes('mail.google.com')) {
-                throw new Error('Please navigate to Gmail to use this extension');
-            }
-
-            // Try to get email content first
-            try {
-                const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
-                if (response) {
-                    return response;
-                }
-            } catch (error) {
-                // Content script not loaded, continue to injection
-            }
-
-            // Inject content script
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId: tab.id },
-                    files: ['content.js']
-                });
-                
-                // Wait a bit for the script to initialize
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                // Try getting email content again
-                const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
-                if (response) {
-                    return response;
-                }
-                throw new Error('No email content found');
-            } catch (error) {
-                if (error.message.includes('Cannot access contents of url')) {
-                    throw new Error('Please refresh the Gmail page to use the extension');
-                }
-                throw error;
+            const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
+            if (response) {
+                return response;
             }
         } catch (error) {
+            // Content script not loaded, continue to injection
+        }
+
+        // Inject content script
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content.js']
+            });
+            
+            // Wait a bit for the script to initialize
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Try getting email content again
+            const response = await chrome.tabs.sendMessage(tab.id, { action: 'getEmailContent' });
+            if (response) {
+                return response;
+            }
+            throw new Error('No email content found');
+        } catch (error) {
+            if (error.message.includes('Cannot access contents of url')) {
+                throw new Error('Please refresh the Gmail page to use the extension');
+            }
             throw error;
         }
     }
@@ -259,71 +268,33 @@ document.addEventListener('DOMContentLoaded', function() {
         testMenuBtn.classList.remove('active');
     }
     
-    // Apply menu button
-    applyMenuBtn.addEventListener('click', function() {
-        // If this section is already visible, hide it
-        if (applySection.style.display === 'block') {
-            applySection.style.display = 'none';
-            applyMenuBtn.classList.remove('active');
-            return;
-        }
-        
-        // Otherwise, hide all sections and show this one
-        hideAllSections();
-        applySection.style.display = 'block';
-        applyMenuBtn.classList.add('active');
-        showStatus('Select emails to apply labels to');
-    });
+    // Function to handle menu button clicks
+    function setupMenuButton(menuBtn, section, statusMessage, additionalAction = null) {
+        menuBtn.addEventListener('click', function() {
+            // If this section is already visible, hide it
+            if (section.style.display === 'block') {
+                section.style.display = 'none';
+                menuBtn.classList.remove('active');
+                return;
+            }
+            
+            // Otherwise, hide all sections and show this one
+            hideAllSections();
+            section.style.display = 'block';
+            menuBtn.classList.add('active');
+            showStatus(statusMessage);
+            
+            // Run any additional action if provided
+            if (additionalAction) additionalAction();
+        });
+    }
     
-    // Train menu button
-    trainMenuBtn.addEventListener('click', function() {
-        // If this section is already visible, hide it
-        if (trainingSection.style.display === 'block') {
-            trainingSection.style.display = 'none';
-            trainMenuBtn.classList.remove('active');
-            return;
-        }
-        
-        // Otherwise, hide all sections and show this one
-        hideAllSections();
-        trainingSection.style.display = 'block';
-        trainMenuBtn.classList.add('active');
-        showStatus('Enter a label for the currently open email');
-    });
+    // Set up all menu buttons
+    setupMenuButton(applyMenuBtn, applySection, 'Click Apply to process visible emails');
+    setupMenuButton(trainMenuBtn, trainingSection, 'Enter a label for the currently open email');
+    setupMenuButton(batchMenuBtn, batchTrainingSection, 'Select multiple emails in Gmail and enter a label');
+    setupMenuButton(testMenuBtn, testSection, 'Enter text to test the model', () => testInput.focus());
     
-    // Batch menu button
-    batchMenuBtn.addEventListener('click', function() {
-        // If this section is already visible, hide it
-        if (batchTrainingSection.style.display === 'block') {
-            batchTrainingSection.style.display = 'none';
-            batchMenuBtn.classList.remove('active');
-            return;
-        }
-        
-        // Otherwise, hide all sections and show this one
-        hideAllSections();
-        batchTrainingSection.style.display = 'block';
-        batchMenuBtn.classList.add('active');
-        showStatus('Select multiple emails in Gmail and enter a label');
-    });
-    
-    // Test menu button
-    testMenuBtn.addEventListener('click', function() {
-        // If this section is already visible, hide it
-        if (testSection.style.display === 'block') {
-            testSection.style.display = 'none';
-            testMenuBtn.classList.remove('active');
-            return;
-        }
-        
-        // Otherwise, hide all sections and show this one
-        hideAllSections();
-        testSection.style.display = 'block';
-        testMenuBtn.classList.add('active');
-        testInput.focus();
-        showStatus('Enter text to test the model');
-    });
-
     // Check server status
     checkServerBtn.addEventListener('click', async () => {
         try {
@@ -477,7 +448,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     batchTotalCount.textContent = response.totalEmails || '0';
                     
                     // Update UI when batch processing is complete
-                    chrome.runtime.onMessage.addListener(function batchTrainingListener(message) {
+                    const batchTrainingListener = function(message) {
                         if (message.action === 'batchTrainingUpdate') {
                             batchProgressCount.textContent = message.processed;
                         } else if (message.action === 'batchTrainingComplete') {
@@ -485,9 +456,16 @@ document.addEventListener('DOMContentLoaded', function() {
                             batchProcessingIndicator.style.display = 'none';
                             batchResults.style.display = 'block';
                             batchSuccessCount.textContent = message.successCount;
-                            showStatus('Batch training complete!');
+                            
+                            // Show label application count if available
+                            if (message.labelAppliedCount !== undefined) {
+                                showStatus(`Batch training complete! ${message.successCount} emails trained, ${message.labelAppliedCount} labels applied.`);
+                            } else {
+                                showStatus('Batch training complete!');
+                            }
                         }
-                    });
+                    };
+                    chrome.runtime.onMessage.addListener(batchTrainingListener);
                 } else {
                     showStatus('Failed to start batch training: ' + (response ? response.error : 'Unknown error'), true);
                     batchProcessingIndicator.style.display = 'none';

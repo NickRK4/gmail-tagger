@@ -15,7 +15,7 @@
     "scripting"
   ],
   "oauth2": {
-    "client_id": "177733699411-0km7lv848obgu443jbqjg47l7loab99g.apps.googleusercontent.com",
+    "client_id": "YOUR_OAUTH_CLIENT_ID_HERE.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/gmail.labels",
       "https://www.googleapis.com/auth/gmail.modify"

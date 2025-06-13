@@ -15,23 +15,16 @@ async function getGmailToken() {
 
 function getEmailContent() {
     try {
-        // Try to get thread ID first
-        const threadIdElement = document.querySelector('h2[data-thread-perm-id]');
-        const threadId = threadIdElement ? threadIdElement.getAttribute('data-thread-perm-id') : null;
-        
+        // Get thread ID using the helper function
+        const threadId = getThreadIdFromOpenEmail();
         if (!threadId) {
-            // Try getting from URL
-            const urlMatch = window.location.href.match(/[/#](?:inbox|all|sent|trash|spam)\/([a-zA-Z0-9]+)/);
-            if (!urlMatch || !urlMatch[1]) {
-                console.error('Could not find thread ID');
-                return null;
-            }
-            threadId = urlMatch[1];
+            console.error('Could not find thread ID');
+            return null;
         }
         
         // Get email body and subject
         const emailBody = document.querySelector('.a3s.aiL');
-        const subject = threadIdElement || document.querySelector('h2.hP');
+        const subject = document.querySelector('h2.hP') || document.querySelector('h2[data-thread-perm-id]');
         
         console.log('Found thread ID:', threadId);
         
@@ -124,6 +117,7 @@ async function refreshGmailUI() {
     return false;
 }
 
+// Apply a label to the currently open email
 async function applyLabel(labelName) {
     try {
         console.log('Starting label application for:', labelName);
@@ -134,83 +128,62 @@ async function applyLabel(labelName) {
             throw new Error('Could not get thread ID from email');
         }
         
-        // Get auth token
-        const token = await getGmailToken();
-        if (!token) {
-            throw new Error('Could not get authentication token');
-        }
-        
-        console.log('Got thread ID:', emailContent.threadId);
-        
-        // Get or create label
-        const labelId = await findOrCreateLabel(token, labelName);
-        console.log('Got label ID:', labelId);
-        
-        // Apply label to thread using the correct endpoint
-        const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${emailContent.threadId}/modify`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                addLabelIds: [labelId],
-                removeLabelIds: []
-            })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            console.error('Error applying label. Status:', response.status);
-            console.error('Error details:', error);
-            throw new Error(`Failed to apply label: ${error.error?.message || 'Unknown error'}`);
-        }
-        
-        const result = await response.json();
-        console.log('Successfully applied label, response:', result);
+        // Use the common function to apply the label
+        const result = await applyLabelToEmail(emailContent.threadId, labelName);
         
         // Refresh the UI to show the new label
         setTimeout(() => {
             refreshGmailUI();
         }, 500); // Small delay to ensure the label is applied before refreshing
         
-        return true;
+        return result;
     } catch (error) {
         console.error('Error in applyLabel:', error);
         throw error;
     }
 }
 
-// Function to predict and apply label for new emails
+// Function to predict and apply label to an email
 async function predictAndApplyLabel(emailContent) {
     try {
         if (!emailContent || !emailContent.body) {
-            console.log('No email content to predict');
-            return;
+            console.error('No valid email content to predict');
+            return { status: 'error', message: 'No valid email content' };
         }
-
-        // Call the prediction endpoint
+        
+        // Call prediction API
         const response = await fetch('http://localhost:5050/predict', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                text: emailContent.body
+            body: JSON.stringify({ 
+                text: emailContent.body 
             })
         });
-
+        
         if (!response.ok) {
-            throw new Error('Failed to get prediction');
+            console.error('Error from prediction API:', response.status);
+            return { status: 'error', message: `API error: ${response.status}` };
         }
-
+        
         const prediction = await response.json();
-        if (prediction && prediction.label) {
-            console.log('Predicted label:', prediction.label);
-            await applyLabel(prediction.label);
+        
+        // Only apply label if confidence is above threshold
+        if (prediction.confidence && prediction.confidence >= 0.7) {
+            console.log(`Applying label ${prediction.label} with confidence ${prediction.confidence}`);
+            
+            // Apply the label
+            const result = await applyLabelToEmail(emailContent.threadId, prediction.label);
+            return { status: 'labeled', label: prediction.label, confidence: prediction.confidence, ...result };
+        } else {
+            console.log(`Skipping label application due to low confidence: ${prediction.confidence}`);
+            return { status: 'skipped', reason: 'low_confidence', confidence: prediction.confidence };
         }
+        
     } catch (error) {
-        console.error('Error in predictAndApplyLabel:', error);
+        console.error('Error predicting or applying label:', error);
+        return { status: 'error', message: error.message };
     }
 }
 
@@ -412,33 +385,31 @@ const processedEmails = new Set();
 
 // Function to check if an element is a new email
 function isNewEmail(element) {
-    return (
-        element.matches('div[role="main"] div[role="list"] div[role="listitem"]') ||
-        element.matches('.adn.ads')
-    );
+    // Check if this is a tr element with data-thread-id
+    if (element.tagName === 'TR' && element.hasAttribute('data-thread-id')) {
+        return true;
+    }
+    
+    // Check if this is a div with role='main' (new Gmail UI)
+    if (element.tagName === 'DIV' && element.getAttribute('role') === 'main') {
+        return true;
+    }
+    
+    // Check for any elements with thread ID inside
+    return element.querySelector('[data-thread-perm-id]') !== null;
 }
 
 // Listen for new emails and classify them
 const observer = new MutationObserver((mutations) => {
+    // We'll only process new emails when explicitly requested by the user
+    // through the extension popup, as per user preferences
     mutations.forEach(mutation => {
         mutation.addedNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                // Check if this is a new email
-                if (isNewEmail(node)) {
-                    // Get thread ID to avoid processing the same email twice
-                    const threadId = node.querySelector('[data-thread-perm-id]')?.getAttribute('data-thread-perm-id');
-                    if (threadId && !processedEmails.has(threadId)) {
-                        processedEmails.add(threadId);
-                        
-                        // Get email content and predict label
-                        const emailContent = {
-                            body: node.textContent,
-                            threadId: threadId
-                        };
-                        
-                        console.log('New email detected, predicting label...');
-                        predictAndApplyLabel(emailContent);
-                    }
+            if (node.nodeType === Node.ELEMENT_NODE && isNewEmail(node)) {
+                const threadId = node.getAttribute('data-thread-id');
+                if (threadId && !processedEmails.has(threadId)) {
+                    processedEmails.add(threadId);
+                    console.log('New email detected, thread ID:', threadId);
                 }
             }
         });
@@ -505,103 +476,144 @@ async function batchTrainEmails(emails, label, batchSize) {
     
     let processed = 0;
     let successCount = 0;
+    let labelAppliedCount = 0;
     
-    // Process emails in batches to avoid overwhelming the server
-    for (let i = 0; i < emails.length; i += batchSize) {
-        const batch = emails.slice(i, i + batchSize);
-        
-        // Process each email in the batch
-        for (const email of batch) {
-            try {
-                // Get the thread ID
-                const threadId = email.threadId;
-                if (!threadId) {
-                    console.error('No thread ID found for email');
-                    continue;
-                }
-                
-                // Use the content we already have from the list view
-                // This avoids the need to navigate to each email
-                if (!email.content) {
-                    console.error('No content found for email');
-                    continue;
-                }
-                
-                const emailContent = {
-                    subject: email.content.split('\n')[0] || '',
-                    body: email.content.split('\n').slice(1).join('\n') || '',
-                    threadId: threadId
-                };
-                
-                // Train the model with this email
-                const trainResult = await trainModel(emailContent, label);
-                
-                if (trainResult.success) {
-                    successCount++;
-                }
-            } catch (error) {
-                console.error('Error processing email for batch training:', error);
-            }
-            
-            // Update progress
-            processed++;
-            chrome.runtime.sendMessage({ 
-                action: 'batchTrainingUpdate', 
-                processed: processed 
-            });
+    try {
+        // Get authentication token once for all emails
+        const token = await getGmailToken();
+        if (!token) {
+            throw new Error('Could not get authentication token');
         }
         
-        // Short delay between batches to prevent overloading
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Find or create the label once for all emails
+        const labelId = await findOrCreateLabel(token, label);
+        console.log('Got label ID for batch training:', labelId);
+        
+        // Process emails in batches to avoid overwhelming the server
+        for (let i = 0; i < emails.length; i += batchSize) {
+            const batch = emails.slice(i, i + batchSize);
+            
+            // Process each email in the batch
+            for (const email of batch) {
+                try {
+                    // Get the thread ID
+                    const threadId = email.threadId;
+                    if (!threadId) {
+                        console.error('No thread ID found for email');
+                        continue;
+                    }
+                    
+                    // Use the content we already have from the list view
+                    // This avoids the need to navigate to each email
+                    if (!email.content) {
+                        console.error('No content found for email');
+                        continue;
+                    }
+                    
+                    const emailContent = {
+                        subject: email.content.split('\n')[0] || '',
+                        body: email.content.split('\n').slice(1).join('\n') || '',
+                        threadId: threadId
+                    };
+                    
+                    // Train the model with this email
+                    const trainResult = await trainModel(emailContent, label);
+                    
+                    if (trainResult.success) {
+                        successCount++;
+                        
+                        // Apply the label to the thread
+                        try {
+                            // Apply label to specific thread
+                            const applyResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}/modify`, {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': `Bearer ${token}`,
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    addLabelIds: [labelId]
+                                })
+                            });
+                            
+                            if (applyResponse.ok) {
+                                labelAppliedCount++;
+                                console.log(`Applied label to thread ${threadId}`);
+                            } else {
+                                const error = await applyResponse.json();
+                                console.error('Error applying label to thread:', error);
+                            }
+                        } catch (labelError) {
+                            console.error('Error applying label during batch training:', labelError);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error processing email for batch training:', error);
+                }
+                
+                // Update progress
+                processed++;
+                chrome.runtime.sendMessage({ 
+                    action: 'batchTrainingUpdate', 
+                    processed: processed 
+                });
+            }
+            
+            // Short delay between batches to prevent overloading
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+        // Refresh the UI to show the new labels
+        setTimeout(() => {
+            refreshGmailUI();
+        }, 500);
+        
+    } catch (error) {
+        console.error('Error in batch training process:', error);
     }
     
     // Notify completion
     chrome.runtime.sendMessage({ 
         action: 'batchTrainingComplete', 
         processed: processed,
-        successCount: successCount
+        successCount: successCount,
+        labelAppliedCount: labelAppliedCount
     });
     
-    console.log(`Batch training complete. ${successCount} of ${emails.length} emails trained successfully.`);
+    console.log(`Batch training complete. ${successCount} of ${emails.length} emails trained successfully. ${labelAppliedCount} labels applied.`);
 }
 
 // Helper function to get email content from a thread ID
 async function getEmailContentFromThreadId(threadId) {
     try {
-        // Navigate to thread if not already open
+        // Check if we're already on the thread
         const currentThreadId = getThreadIdFromOpenEmail();
-        
-        if (currentThreadId !== threadId) {
-            // This is a simplification - in a real implementation, 
-            // you would need to either:
-            // 1. Fetch content via Gmail API without navigation, or
-            // 2. Use a more sophisticated approach to extract content from the DOM
-            console.log('Cannot get content of unopened email in batch mode');
-            
-            // For now, we'll extract what we can from the email list view
-            const emailRows = document.querySelectorAll('tr.zA');
-            for (const row of emailRows) {
-                const rowThreadId = row.getAttribute('data-thread-id');
-                if (rowThreadId === threadId) {
-                    // Extract subject from the row
-                    const subjectEl = row.querySelector('.y6');
-                    const bodyPreviewEl = row.querySelector('.y2');
-                    
-                    if (subjectEl && bodyPreviewEl) {
-                        return {
-                            subject: subjectEl.innerText || '',
-                            body: bodyPreviewEl.innerText || '',
-                            snippetOnly: true
-                        };
-                    }
-                }
-            }
-            
-            return null;
+        if (currentThreadId === threadId) {
+            return getEmailContent();
         }
         
-        // If we're already on the thread, get the content normally
-        return getEmailContent();
+        // Extract what we can from the email list view
+        const emailRows = document.querySelectorAll('tr.zA');
+        for (const row of emailRows) {
+            const rowThreadId = row.getAttribute('data-thread-id');
+            if (rowThreadId === threadId) {
+                // Extract subject from the row
+                const subjectEl = row.querySelector('.y6');
+                const bodyPreviewEl = row.querySelector('.y2');
+                
+                if (subjectEl && bodyPreviewEl) {
+                    return {
+                        subject: subjectEl.innerText || '',
+                        body: bodyPreviewEl.innerText || '',
+                        threadId: threadId,
+                        snippetOnly: true
+                    };
+                }
+            }
+        }
+        
+        console.log('Cannot get content of unopened email in batch mode');
+        return null;
     } catch (error) {
         console.error('Error getting email content from thread ID:', error);
         return null;

@@ -5,6 +5,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import pickle
 import os
 import numpy as np
+import traceback
 
 class EmailClassifier:
     def __init__(self, model_path='model.pkl'):
@@ -68,7 +69,6 @@ class EmailClassifier:
             return True
         except Exception as e:
             print(f"Error during training: {str(e)}")
-            import traceback
             traceback.print_exc()
             raise
 
@@ -92,7 +92,6 @@ class EmailClassifier:
             
         except Exception as e:
             print(f"Error during prediction: {str(e)}")
-            import traceback
             traceback.print_exc()
             return None
             
@@ -176,7 +175,6 @@ class EmailClassifier:
             
         except Exception as e:
             print(f"Error during prediction with confidence: {str(e)}")
-            import traceback
             traceback.print_exc()
             return None, 0.0
 
@@ -196,7 +194,6 @@ class EmailClassifier:
             print(f"Model saved to {self.model_path}")
         except Exception as e:
             print(f"Error saving model: {str(e)}")
-            import traceback
             traceback.print_exc()
             raise
 
@@ -226,7 +223,6 @@ class EmailClassifier:
             return False
         except Exception as e:
             print(f"Error loading model: {str(e)}")
-            import traceback
             traceback.print_exc()
             # Initialize empty model if loading fails
             self.texts = []
@@ -329,6 +325,5 @@ class EmailClassifier:
             
         except Exception as e:
             print(f"Error during evaluation: {str(e)}")
-            import traceback
             traceback.print_exc()
             return {'error': str(e)}
