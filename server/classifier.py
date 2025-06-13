@@ -1,13 +1,14 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
-import numpy as np
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import pickle
 import os
-import random
+import numpy as np
 
 class EmailClassifier:
     def __init__(self, model_path='model.pkl'):
-        # Use a simpler Multinomial Naive Bayes classifier instead of XGBoost
+        # Use a simpler Multinomial Naive Bayes classifier
         self.classifier = MultinomialNB(alpha=2.0)  # Higher alpha for more smoothing
         self.vectorizer = TfidfVectorizer(
             max_features=1000, 
@@ -214,7 +215,7 @@ class EmailClassifier:
                     self.min_text_length = data.get('min_text_length', 5)
                 print(f"Model loaded from {self.model_path} with {len(self.texts)} examples")
                 
-                # Print label distribution
+                # Print 
                 if self.labels:
                     label_counts = {}
                     for l in self.labels:
@@ -253,3 +254,81 @@ class EmailClassifier:
         self.save_model()
         print("Model has been reset")
         return True
+        
+    def evaluate_accuracy(self, test_size=0.2, cv=5):
+        """Evaluate model accuracy using cross-validation and/or train-test split.
+        
+        Args:
+            test_size: Proportion of data to use for testing (0.0 to 1.0)
+            cv: Number of cross-validation folds
+            
+        Returns:
+            dict: Dictionary containing accuracy metrics
+        """
+        try:
+            # Check if we have enough data
+            if not self.is_trained or len(self.texts) < 10:
+                return {
+                    'error': 'Not enough training data for evaluation',
+                    'min_required': 10,
+                    'current_count': len(self.texts)
+                }
+                
+            # Check if we have enough examples per class
+            label_counts = {}
+            for l in self.labels:
+                label_counts[l] = label_counts.get(l, 0) + 1
+                
+            # Need at least 2 examples per class for evaluation
+            for label, count in label_counts.items():
+                if count < 2:
+                    return {
+                        'error': f'Need at least 2 examples for label "{label}" (currently has {count})',
+                        'label_counts': label_counts
+                    }
+            
+            # Vectorize all texts
+            X = self.vectorizer.transform(self.texts)
+            y = np.array(self.labels)
+            
+            results = {}
+            
+            # Cross-validation score
+            cv_scores = cross_val_score(self.classifier, X, y, cv=cv)
+            results['cross_val_scores'] = cv_scores.tolist()
+            results['cross_val_mean'] = float(cv_scores.mean())
+            results['cross_val_std'] = float(cv_scores.std())
+            
+            # Train-test split evaluation
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, stratify=y, random_state=42)
+            
+            # Train on training set
+            clf = MultinomialNB(alpha=2.0)
+            clf.fit(X_train, y_train)
+            
+            # Predict on test set
+            y_pred = clf.predict(X_test)
+            
+            # Calculate metrics
+            test_accuracy = accuracy_score(y_test, y_pred)
+            results['test_accuracy'] = float(test_accuracy)
+            
+            # Get detailed classification report
+            report = classification_report(y_test, y_pred, output_dict=True)
+            results['classification_report'] = report
+            
+            # Get confusion matrix
+            cm = confusion_matrix(y_test, y_pred)
+            results['confusion_matrix'] = cm.tolist()
+            
+            # Add label distribution
+            results['label_counts'] = label_counts
+            results['total_examples'] = len(self.texts)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error during evaluation: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'error': str(e)}

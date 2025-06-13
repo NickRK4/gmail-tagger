@@ -109,5 +109,57 @@ def reset_model():
         app.logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/evaluate', methods=['POST'])
+def evaluate_model():
+    try:
+        data = request.json
+        test_size = data.get('test_size', 0.2)
+        cv = data.get('cv', 5)
+        
+        # Validate parameters
+        if not 0 < test_size < 1:
+            return jsonify({'error': 'test_size must be between 0 and 1'}), 400
+            
+        if not isinstance(cv, int) or cv < 2:
+            return jsonify({'error': 'cv must be an integer greater than 1'}), 400
+        
+        # Evaluate model accuracy
+        results = classifier.evaluate_accuracy(test_size=test_size, cv=cv)
+        
+        if 'error' in results:
+            return jsonify(results), 400
+            
+        return jsonify({
+            'status': 'success',
+            'results': results
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in evaluate: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
+    # Evaluate model accuracy before starting the server
+    try:
+        print("\nEvaluating model accuracy...")
+        results = classifier.evaluate_accuracy()
+        if 'error' in results:
+            print(f"Evaluation error: {results['error']}")
+        else:
+            print(f"Model accuracy: {results['test_accuracy']:.2f}")
+            print(f"Cross-validation accuracy: {results['cross_val_mean']:.2f} ± {results['cross_val_std']:.2f}")
+            print(f"Label distribution: {results['label_counts']}")
+            print("\nDetailed metrics per label:")
+            for label, metrics in results['classification_report'].items():
+                if label not in ['accuracy', 'macro avg', 'weighted avg']:
+                    try:
+                        print(f"  {label}: precision={metrics['precision']:.2f}, recall={metrics['recall']:.2f}, f1-score={metrics['f1-score']:.2f}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"Error evaluating model: {str(e)}")
+    
+    # Start the server
+    print("\nStarting server...")
     app.run(debug=True, host='0.0.0.0', port=5050)  # Changed to port 5050 to avoid conflicts
